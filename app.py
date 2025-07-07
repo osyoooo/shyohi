@@ -30,11 +30,16 @@ def load_tax_law_xml(path_pattern: str) -> pd.DataFrame:
             date = m.group(1) if m else '不明'
         for art in root.findall('.//Article'):
             num = art.attrib.get('Num') or art.findtext('ArticleTitle') or '不明'
+            title = art.findtext('ArticleTitle') or ''
+            caption = art.findtext('ArticleCaption') or ''
             txt = _extract_article_text(art)
             records.append({
                 'id': os.path.basename(filepath) + '#' + str(num),
                 'effective_date': date,
                 'article': str(num),
+                'title': title,
+                'caption': caption,
+                'article_label': f"{num} {title or caption}",
                 'text': txt
             })
     return pd.DataFrame(records)
@@ -60,13 +65,8 @@ model, index, embs = init_vector_index(df)
 # サイドバー：絞り込みフィルター
 st.sidebar.header('🔍 絞り込みフィルター')
 dates = st.sidebar.multiselect('施行日', sorted(df['effective_date'].unique()))
-arts  = st.sidebar.multiselect('条文番号', sorted(df['article'].unique()))
+arts  = st.sidebar.multiselect('条文', sorted(df['article_label'].unique()))
 
-fdf = df
-if dates:
-    fdf = fdf[fdf['effective_date'].isin(dates)]
-if arts:
-    fdf = fdf[fdf['article'].isin(arts)]
 
 # メイン：検索クエリ
 query = st.text_input('🔎 ご質問を入力してください')
@@ -79,12 +79,12 @@ if query:
     if dates:
         results = results[results['effective_date'].isin(dates)]
     if arts:
-        results = results[results['article'].isin(arts)]
+        results = results[results['article_label'].isin(arts)]
     results = results.head(top_k)
     st.markdown("### 検索結果")
     for _, row in results.iterrows():
-        st.subheader(f"条文 {row['article']} （施行日: {row['effective_date']}）")
-        st.write(row['text'])
+        with st.expander(f"条文 {row['article_label']} （施行日: {row['effective_date']}）"):
+            st.write(row['text'])
 
 # フッター
 st.sidebar.markdown("---")
