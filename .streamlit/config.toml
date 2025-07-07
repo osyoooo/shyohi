@@ -1,4 +1,4 @@
 [server]
 headless = true
 enableCORS = false
-port = $PORT
+# port の指定は削除 or 固定整数に。Cloudでは不要です。
