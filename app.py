@@ -1,10 +1,22 @@
-import streamlit as st
-import glob, os
+import glob
+import os
+import re
 import xml.etree.ElementTree as ET
-import pandas as pd
-from sentence_transformers import SentenceTransformer
+
 import faiss
 import numpy as np
+import pandas as pd
+import streamlit as st
+from sentence_transformers import SentenceTransformer
+
+def _extract_article_text(article: ET.Element) -> str:
+    """Collect text from an Article element."""
+    caption = article.findtext('ArticleCaption') or ''
+    title = article.findtext('ArticleTitle') or ''
+    sentences = [s.text.strip() for s in article.findall('.//Sentence') if s.text]
+    body = ' '.join(sentences)
+    return ' '.join([caption, title, body]).strip()
+
 
 @st.cache_data
 def load_tax_law_xml(path_pattern: str) -> pd.DataFrame:
@@ -12,15 +24,18 @@ def load_tax_law_xml(path_pattern: str) -> pd.DataFrame:
     for filepath in glob.glob(path_pattern):
         tree = ET.parse(filepath)
         root = tree.getroot()
-        date = root.findtext('.//EffectiveDate') or '不明'
+        date = root.findtext('.//EffectiveDate')
+        if not date:
+            m = re.search(r'_(\d{8})_', os.path.basename(filepath))
+            date = m.group(1) if m else '不明'
         for art in root.findall('.//Article'):
-            num = art.findtext('Number') or '不明'
-            txt = art.findtext('Content') or ''
+            num = art.attrib.get('Num') or art.findtext('ArticleTitle') or '不明'
+            txt = _extract_article_text(art)
             records.append({
-                'id': os.path.basename(filepath) + '#' + num,
+                'id': os.path.basename(filepath) + '#' + str(num),
                 'effective_date': date,
-                'article': num,
-                'text': txt.strip()
+                'article': str(num),
+                'text': txt
             })
     return pd.DataFrame(records)
 
@@ -59,8 +74,13 @@ top_k = st.slider('表示件数', 1, 10, 5)
 
 if query:
     q_emb = model.encode(query, convert_to_tensor=True).cpu().numpy()
-    dists, idxs = index.search(q_emb.reshape(1,-1), top_k)
-    results = fdf.iloc[idxs[0]]
+    dists, idxs = index.search(q_emb.reshape(1, -1), len(df))
+    results = df.iloc[idxs[0]]
+    if dates:
+        results = results[results['effective_date'].isin(dates)]
+    if arts:
+        results = results[results['article'].isin(arts)]
+    results = results.head(top_k)
     st.markdown("### 検索結果")
     for _, row in results.iterrows():
         st.subheader(f"条文 {row['article']} （施行日: {row['effective_date']}）")
